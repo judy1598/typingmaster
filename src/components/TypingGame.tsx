@@ -601,22 +601,19 @@ export default function TypingGame() {
   }, [isStarted, isFinished]);
 
   // 실시간 타이머
-  // 커스텀 모드: 소요시간 = 실제 타이핑 시간만(문장 끝나면 멈춤), WPM = 첫 문장~마지막까지 끊김 없이 측정
-  // 일반 모드: 문장 입력 중일 때만 실행
+  // 모든 모드: 소요시간·WPM 모두 첫 입력~최종결과까지 끊기지 않고 계속 흐름
   useEffect(() => {
-    const baseTime = useCustomMode && totalStartTime ? totalStartTime : startTime;
-    const shouldRun = isStarted && !showSummary && baseTime && (useCustomMode || !isFinished);
+    const baseTime = totalStartTime || startTime;
+    const useRoundTimer = !!totalStartTime; // 커스텀 또는 한/영 라운드 연속 측정
+    const shouldRun = isStarted && !showSummary && baseTime && (useRoundTimer || !isFinished);
     if (!shouldRun) return;
 
     const timer = setInterval(() => {
-      if (useCustomMode && totalStartTime) {
-        // WPM: 전체 경과 시간(끊김 없음)
+      if (totalStartTime) {
+        // WPM·소요시간: 전체 경과(끊김 없음) — 모든 모드 동일
         const totalElapsedSeconds = Math.floor((Date.now() - totalStartTime) / 1000);
         const wpmElapsedMinutes = totalElapsedSeconds / 60;
-        // 소요시간: 실제 타이핑한 시간만 (문장 완료 시 멈춤, 다음 문장 입력 시 재개)
-        const currentSentenceSeconds = startTime && !isFinished ? Math.floor((Date.now() - startTime) / 1000) : 0;
-        const displayElapsedSeconds = totalActiveSeconds + currentSentenceSeconds;
-        const newStats = calculateStats(userInput, targetText, wpmElapsedMinutes, displayElapsedSeconds, useCustomMode, totalCorrectChars);
+        const newStats = calculateStats(userInput, targetText, wpmElapsedMinutes, totalElapsedSeconds, true, totalCorrectChars);
         setStats(newStats);
       } else if (startTime) {
         const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
@@ -669,8 +666,8 @@ export default function TypingGame() {
     // 첫 입력 시 타이머 시작
     if (userInput.length === 0 && input.length > 0 && !startTime) {
       setStartTime(Date.now());
-      // 커스텀 모드의 첫 문장이면 전체 타이머도 시작
-      if (useCustomMode && !totalStartTime) {
+      // 커스텀 모드 또는 한/영 모드 라운드: 전체 타이머 시작(최종결과까지 끊기지 않음)
+      if (!totalStartTime) {
         setTotalStartTime(Date.now());
       }
     }
@@ -679,28 +676,22 @@ export default function TypingGame() {
 
     if (input === targetText) {
       setIsFinished(true);
-      // 커스텀 모드: WPM은 전체 시간, 소요시간은 실제 타이핑 시간만 누적
-      const baseTime = useCustomMode && totalStartTime ? totalStartTime : startTime;
+      // 라운드 연속 측정(커스텀 또는 한/영 totalStartTime 사용 시): WPM은 전체 시간 기준
+      const baseTime = totalStartTime || startTime;
       const elapsedSeconds = baseTime ? Math.floor((Date.now() - baseTime) / 1000) : 0;
       const elapsedMinutes = elapsedSeconds / 60;
-      let finalStats = calculateStats(input, targetText, elapsedMinutes, elapsedSeconds, useCustomMode, totalCorrectChars);
+      const useRoundTiming = !!totalStartTime;
+      let finalStats = calculateStats(input, targetText, elapsedMinutes, elapsedSeconds, useRoundTiming, totalCorrectChars);
 
       if (useCustomMode) {
-        // 이 문장 타이핑한 시간만 소요시간에 더함 (문장 끝나면 시간 멈춤)
         const sentenceDurationSec = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
-        const newActiveTotal = totalActiveSeconds + sentenceDurationSec;
-        setTotalActiveSeconds(newActiveTotal);
-        finalStats = { ...finalStats, elapsedSeconds: newActiveTotal }; // 표시용 소요시간
+        setTotalActiveSeconds(prev => prev + sentenceDurationSec);
+      }
+      if (useRoundTiming) {
         setTotalCorrectChars(prev => prev + finalStats.correctChars);
       }
       setStats(finalStats);
 
-      // 목표 타자속도 달성 시 축하 모달 표시
-      if (finalStats.wpm >= targetWpm) {
-        setAchievedWpm(finalStats.wpm);
-        setShowTargetAchievedModal(true);
-      }
-      
       // 통계 저장 및 카운트 증가
       const newCount = completedCount + 1;
       setCompletedCount(newCount);
@@ -710,14 +701,26 @@ export default function TypingGame() {
       if (useCustomMode) {
         const selectedFolder = folders.find(f => f.id === selectedFolderId);
         setCustomTextIndex(prev => prev + 1);
-        // 전체 커스텀 문장을 완료하면 요약 표시
+        // 전체 커스텀 문장을 완료하면 요약 표시 + 목표 달성 시 축하 모달(최종결과 때만)
         if (selectedFolder && selectedFolder.sentences.length > 0 && (newCount % selectedFolder.sentences.length === 0)) {
           setShowSummary(true);
+          const newStatsArray = [...allStats, finalStats];
+          const avgWpm = newStatsArray.reduce((s, x) => s + x.wpm, 0) / newStatsArray.length;
+          if (avgWpm >= targetWpm) {
+            setAchievedWpm(avgWpm);
+            setShowTargetAchievedModal(true);
+          }
         }
       } else {
-        // 일반 모드: 15문장마다 종합 결과 표시
+        // 일반 모드: 15문장마다 종합 결과 표시 + 목표 달성 시 축하 모달(최종결과 때만)
         if (newCount % 15 === 0) {
           setShowSummary(true);
+          const newStatsArray = [...allStats, finalStats];
+          const avgWpm = newStatsArray.reduce((s, x) => s + x.wpm, 0) / newStatsArray.length;
+          if (avgWpm >= targetWpm) {
+            setAchievedWpm(avgWpm);
+            setShowTargetAchievedModal(true);
+          }
         }
       }
     }
@@ -783,12 +786,15 @@ export default function TypingGame() {
     }
 
     setShowSummary(false);
-    // 커스텀 모드에서 전체 완료 후에는 처음부터 다시 시작
+    // 최종결과 후 다음 라운드: 연속 측정용 상태 초기화
     if (useCustomMode) {
       setCustomTextIndex(0);
       setTotalStartTime(null);
       setTotalCorrectChars(0);
       setTotalActiveSeconds(0);
+    } else {
+      setTotalStartTime(null);
+      setTotalCorrectChars(0);
     }
     startGame();
   };
