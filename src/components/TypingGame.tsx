@@ -600,25 +600,21 @@ export default function TypingGame() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStarted, isFinished]);
 
-  // 실시간 타이머
-  // 모든 모드: 소요시간·WPM 모두 첫 입력~최종결과까지 끊기지 않고 계속 흐름
+  // 실시간 타이머 — 밀리초 기반 WPM·소요시간
   useEffect(() => {
     const baseTime = totalStartTime || startTime;
-    const useRoundTimer = !!totalStartTime; // 커스텀 또는 한/영 라운드 연속 측정
+    const useRoundTimer = !!totalStartTime;
     const shouldRun = isStarted && !showSummary && baseTime && (useRoundTimer || !isFinished);
     if (!shouldRun) return;
 
     const timer = setInterval(() => {
       if (totalStartTime) {
-        // WPM·소요시간: 전체 경과(끊김 없음) — 모든 모드 동일
-        const totalElapsedSeconds = Math.floor((Date.now() - totalStartTime) / 1000);
-        const wpmElapsedMinutes = totalElapsedSeconds / 60;
-        const newStats = calculateStats(userInput, targetText, wpmElapsedMinutes, totalElapsedSeconds, true, totalCorrectChars);
+        const elapsedMs = Date.now() - totalStartTime;
+        const newStats = calculateStats(userInput, targetText, elapsedMs, true, totalCorrectChars);
         setStats(newStats);
       } else if (startTime) {
-        const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
-        const elapsedMinutes = elapsedSeconds / 60;
-        const newStats = calculateStats(userInput, targetText, elapsedMinutes, elapsedSeconds, false, 0);
+        const elapsedMs = Date.now() - startTime;
+        const newStats = calculateStats(userInput, targetText, elapsedMs, false, 0);
         setStats(newStats);
       }
     }, 100);
@@ -626,13 +622,13 @@ export default function TypingGame() {
     return () => clearInterval(timer);
   }, [isStarted, isFinished, startTime, userInput, targetText, language, useCustomMode, totalStartTime, totalCorrectChars, totalActiveSeconds, showSummary]);
 
+  /** elapsedMs: 밀리초 단위 경과 시간 (WPM 정밀 계산용) */
   const calculateStats = (
-    input: string, 
-    target: string, 
-    elapsedMinutes: number, 
-    elapsedSeconds: number, 
-    isCustomMode: boolean = false, 
-    accumulatedCorrectChars: number = 0
+    input: string,
+    target: string,
+    elapsedMs: number,
+    isRoundTiming: boolean,
+    accumulatedCorrectChars: number
   ) => {
     let correctChars = 0;
     let errors = 0;
@@ -647,13 +643,14 @@ export default function TypingGame() {
 
     const totalChars = input.length;
     const accuracy = totalChars > 0 ? (correctChars / totalChars) * 100 : 0;
-    
-    // WPM 계산
-    // 커스텀 모드: 누적된 전체 글자 수로 계산
-    // 일반 모드: 현재 문장 글자 수로 계산
-    const charsForWpm = isCustomMode ? (accumulatedCorrectChars + correctChars) : correctChars;
+    const elapsedSeconds = Math.round(elapsedMs / 1000);
+    const elapsedMinutes = elapsedMs / 60_000;
+
+    // WPM: 밀리초 기반 정밀 계산. 정답 글자만 반영(오타는 자동으로 속도에 반영)
+    const charsForWpm = isRoundTiming ? accumulatedCorrectChars + correctChars : correctChars;
     const wordsTyped = language === 'korean' ? charsForWpm : charsForWpm / 5;
-    const wpm = elapsedMinutes > 0 ? Math.round(wordsTyped / elapsedMinutes) : 0;
+    const rawWpm = elapsedMinutes > 0 ? wordsTyped / elapsedMinutes : 0;
+    const wpm = Math.round(rawWpm * 10) / 10; // 소수 1자리
 
     return { wpm, accuracy, errors, correctChars, totalChars, elapsedSeconds };
   };
@@ -676,12 +673,10 @@ export default function TypingGame() {
 
     if (input === targetText) {
       setIsFinished(true);
-      // 라운드 연속 측정(커스텀 또는 한/영 totalStartTime 사용 시): WPM은 전체 시간 기준
       const baseTime = totalStartTime || startTime;
-      const elapsedSeconds = baseTime ? Math.floor((Date.now() - baseTime) / 1000) : 0;
-      const elapsedMinutes = elapsedSeconds / 60;
+      const elapsedMs = baseTime ? Date.now() - baseTime : 0;
       const useRoundTiming = !!totalStartTime;
-      let finalStats = calculateStats(input, targetText, elapsedMinutes, elapsedSeconds, useRoundTiming, totalCorrectChars);
+      const finalStats = calculateStats(input, targetText, elapsedMs, useRoundTiming, totalCorrectChars);
 
       if (useCustomMode) {
         const sentenceDurationSec = startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
@@ -755,7 +750,7 @@ export default function TypingGame() {
       statsCount = selectedFolder && selectedFolder.sentences.length > 0 ? selectedFolder.sentences.length : 15;
     }
     const recentStats = allStats.slice(-statsCount);
-    const avgWpm = Math.round(recentStats.reduce((sum, s) => sum + s.wpm, 0) / recentStats.length);
+    const avgWpm = Math.round((recentStats.reduce((sum, s) => sum + s.wpm, 0) / recentStats.length) * 10) / 10;
     const avgAccuracy = recentStats.reduce((sum, s) => sum + s.accuracy, 0) / recentStats.length;
     const avgTime = Math.round(recentStats.reduce((sum, s) => sum + s.elapsedSeconds, 0) / recentStats.length);
     const totalErrors = recentStats.reduce((sum, s) => sum + s.errors, 0);
@@ -764,12 +759,13 @@ export default function TypingGame() {
   };
 
   const closeSummary = () => {
-    // 최종결과를 리더보드에 저장
+    // 최종결과를 리더보드에 저장 (표시값과 동일하게)
     const avgStats = calculateAverageStats();
     if (avgStats) {
+      // 일반 모드: 평균 소요 시간(초) | 커스텀: 총 소요 시간(초) — 최종결과 모달과 동일
       const totalElapsed = useCustomMode && allStats.length > 0
         ? allStats[allStats.length - 1].elapsedSeconds
-        : Math.round(avgStats.avgTime * avgStats.count);
+        : avgStats.avgTime;
       const entry: LeaderboardEntry = {
         id: Date.now().toString(),
         wpm: avgStats.avgWpm,
@@ -1264,10 +1260,12 @@ export default function TypingGame() {
                     <tbody>
                       {sorted.map((entry, index) => {
                         const rank = index + 1;
+                        const isAvg = entry.mode === 'normal';
                         const timeStr =
                           entry.elapsedSeconds >= 60
                             ? `${Math.floor(entry.elapsedSeconds / 60)}분 ${entry.elapsedSeconds % 60}초`
                             : `${entry.elapsedSeconds}초`;
+                        const timeDisplay = isAvg ? `${timeStr} (평균)` : timeStr;
                         const dateStr = new Date(entry.date).toLocaleDateString('ko-KR', {
                           month: 'short',
                           day: 'numeric',
@@ -1283,8 +1281,8 @@ export default function TypingGame() {
                             <td className="py-3 px-2 font-bold">
                               {rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : rank}
                             </td>
-                            <td className="py-3 px-2 font-bold text-cyan-400">{entry.wpm} WPM</td>
-                            <td className="py-3 px-2 text-purple-300">{timeStr}</td>
+                            <td className="py-3 px-2 font-bold text-cyan-400">{Number(entry.wpm).toFixed(1)} WPM</td>
+                            <td className="py-3 px-2 text-purple-300">{timeDisplay}</td>
                             <td className="py-3 px-2 text-white">{entry.sentenceCount}문장</td>
                             <td className="py-3 px-2 text-gray-400 text-sm hidden sm:table-cell">{dateStr}</td>
                             <td className="py-3 px-2 text-gray-400 text-sm hidden md:table-cell">{modeLabel}</td>
@@ -1320,7 +1318,7 @@ export default function TypingGame() {
                 목표: <span className="font-bold text-yellow-300">{targetWpm} WPM</span>
               </p>
               <p className="text-2xl font-bold text-yellow-300 mb-8">
-                달성: <span className="text-yellow-400">{achievedWpm} WPM</span>
+                달성: <span className="text-yellow-400">{Number(achievedWpm).toFixed(1)} WPM</span>
               </p>
               <button
                 onClick={() => setShowTargetAchievedModal(false)}
@@ -1366,7 +1364,7 @@ export default function TypingGame() {
                     <div className="bg-gray-950/70 p-6 rounded-2xl border-2 border-cyan-400/50 shadow-[0_0_20px_rgba(34,211,238,0.4)]">
                       <p className="text-cyan-300 text-sm mb-2">⚡ 평균 타자 속도</p>
                       <p className="text-5xl font-bold text-cyan-400 drop-shadow-[0_0_15px_rgba(34,211,238,0.8)]">
-                        {avgStats.avgWpm}
+                        {Number(avgStats.avgWpm).toFixed(1)}
                       </p>
                       <p className="text-cyan-300/70 text-sm mt-1">WPM</p>
                     </div>
@@ -1620,7 +1618,7 @@ export default function TypingGame() {
                     <p className={`text-5xl font-bold drop-shadow-[0_0_15px] ${
                       stats.wpm >= targetWpm ? 'text-yellow-400' : 'text-purple-400'
                     }`}>
-                      {stats.wpm}
+                      {Number(stats.wpm).toFixed(1)}
                     </p>
                     <p className={`text-sm mt-1 ${
                       stats.wpm >= targetWpm ? 'text-yellow-300/70' : 'text-purple-300/70'
@@ -1682,7 +1680,7 @@ export default function TypingGame() {
                         <p className={`text-3xl font-bold drop-shadow-[0_0_10px] ${
                           stats.wpm >= targetWpm ? 'text-yellow-400' : 'text-purple-400'
                         }`}>
-                          {stats.wpm} WPM
+                          {Number(stats.wpm).toFixed(1)} WPM
                         </p>
                         {stats.wpm >= targetWpm && (
                           <p className="text-xs text-yellow-300/70 mt-1">목표: {targetWpm} WPM</p>
