@@ -40,11 +40,11 @@ function reloadWithMode(lang?: Language, practice?: PracticeType, custom?: boole
 }
 
 export default function TypingGame() {
-  const [language, setLanguage] = useState<Language>(() => {
+  const [language, _setLanguage] = useState<Language>(() => {
     const s = localStorage.getItem(STORAGE_KEYS.language);
     return (s === 'korean' || s === 'english') ? s : 'korean';
   });
-  const [practiceType, setPracticeType] = useState<PracticeType>(() => {
+  const [practiceType, _setPracticeType] = useState<PracticeType>(() => {
     const s = localStorage.getItem(STORAGE_KEYS.practiceType);
     return (s === 'position' || s === 'word' || s === 'short' || s === 'long') ? s : 'short';
   });
@@ -94,7 +94,7 @@ export default function TypingGame() {
   const [newFolderName, setNewFolderName] = useState('');
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [editingFolderName, setEditingFolderName] = useState('');
-  const [useCustomMode, setUseCustomMode] = useState(() => localStorage.getItem(STORAGE_KEYS.useCustomMode) === 'true');
+  const [useCustomMode, _setUseCustomMode] = useState(() => localStorage.getItem(STORAGE_KEYS.useCustomMode) === 'true');
   const [customTextIndex, setCustomTextIndex] = useState(0); // 커스텀 문장 순서 추적
   const [totalStartTime, setTotalStartTime] = useState<number | null>(null); // 커스텀 모드 전체 시작 시간
   const [totalCorrectChars, setTotalCorrectChars] = useState(0); // 커스텀 모드 누적 정답 글자 수
